@@ -34,19 +34,21 @@ docker run --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=debezium -e MYSQL_US
 
 ## Access Mysql from CLI
 ```
-docker run -it --rm --name mysqlterm --link mysql --rm mysql:5.7 sh -c 'exec mysql -h"$MYSQL_PORT_3306_TCP_ADDR" -P"$MYSQL_PORT_3306_TCP_PORT" -uroot -p"$MYSQL                           _ENV_MYSQL_ROOT_PASSWORD"'
+docker run -it --rm --name mysqlterm --link mysql --rm mysql:5.7 sh -c 'exec mysql -h"$MYSQL_PORT_3306_TCP_ADDR" -P"$MYSQL_PORT_3306_TCP_PORT" -uroot -p"$MYSQL_ENV_MYSQL_ROOT_PASSWORD"'
 ```
 
 ## Start Kafka Connect
 ```
-docker run --name connect -p 8083:8083 -e GROUP_ID=1 -e CONFIG_STORAGE_TOPIC=my_connect_configs -e OFFSET_STORAGE_TOPIC=my_connect_offsets --link zookeeper:zoo                           keeper --link kafka:kafka --link mysql:mysql --detach debezium/connect:0.5
+docker run --name connect -p 8083:8083 -e GROUP_ID=1 -e CONFIG_STORAGE_TOPIC=my_connect_configs -e OFFSET_STORAGE_TOPIC=my_connect_offsets --link zookeeper:zookeeper --link kafka:kafka --link mysql:mysql --detach debezium/connect:0.5
 ```
 
 Now, that all the components are in place, I'll try to run debezium connector for mysql:
 
 ```
-curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" localhost:8083/connectors/ -d '{ "name": "inventory-connector", "config": { "co                           nnector.class": "io.debezium.connector.mysql.MySqlConnector", "tasks.max": "1", "database.hostname": "mysql", "database.port": "3306", "database.user": "debezi                           um", "database.password": "dbz", "database.server.id": "997", "database.server.name": "dbserver1", "database.whitelist": "inventory", "database.history.kafka.b                           ootstrap.servers": "kafka:9092", "database.history.kafka.topic": "dbhistory.inventory" } }'
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" localhost:8083/connectors/ -d '{ "name": "inventory-connector", "config": { "connector.class": "io.debezium.connector.mysql.MySqlConnector", "tasks.max": "1", "database.hostname": "mysql", "database.port": "3306", "database.user": "debezium", "database.password": "dbz", "database.server.id": "997", "database.server.name": "dbserver1", "database.whitelist": "inventory", "database.history.kafka.bootstrap.servers": "kafka:9092", "database.history.kafka.topic": "dbhistory.inventory" } }'
 ```
+
+curl -s -X GET -H "Accept:application/json" localhost:8083/connectors | jq .
 
 curl -s -X GET -H "Accept:application/json" localhost:8083/connectors/inventory-connector | jq .
 
@@ -54,7 +56,7 @@ curl -s -X GET -H "Accept:application/json" localhost:8083/connectors/inventory-
 docker run -it --name watcher --rm --link zookeeper:zookeeper debezium/kafka:0.5 watch-topic -a -k dbserver1.inventory.customers
 
 # Monitor MariaDB
-Debesium tutorial shows monitoring MySQL's CDC. Let's try to configure MariaDB to work with Debesium.
+Debezium tutorial shows monitoring MySQL's CDC. Let's try to configure MariaDB to work with Debezium.
 
 ## Original MariaDB image
 I plan to base on the original MariaDB image, so let's firstly check how the vanilla database behaves. 
@@ -114,9 +116,55 @@ Remember, you will be providing the user and password in connector config.
 
 ### Run
 ```
-docker run --name mariadb -v $PWD/conf.d:/etc/mysql/conf.d -v $PWD/initdb.d:/docker-entrypoint-initdb.d -e MYSQL_ROOT_PASSWORD=test -d mariadb:10.2
+docker run --name mariadb -p 3306:3306 -v $PWD/conf.d:/etc/mysql/conf.d -v $PWD/initdb.d:/docker-entrypoint-initdb.d -e MYSQL_ROOT_PASSWORD=debezium -e MYSQL_USER=mysqluser -e MYSQL_PASSWORD=mysqlpw -d mariadb:10.2
+
 
 docker run -it --link mariadb:mysql --rm mysql sh -c 'exec mysql -h"$MYSQL_PORT_3306_TCP_ADDR" -P"$MYSQL_PORT_3306_TCP_PORT" -uroot -p"$MYSQL_ENV_MYSQL_ROOT_PASSWORD"'
 
 ```
 
+Start debezium images:
+```
+docker run --name zookeeper -p 2181:2181 -p 2888:2888 -p 3888:3888 --detach debezium/zookeeper:0.5
+
+docker run --name kafka -p 9092:9092 --link zookeeper:zookeeper --detach debezium/kafka:0.5
+
+docker run --name connect -p 8083:8083 -e GROUP_ID=1 -e CONFIG_STORAGE_TOPIC=my_connect_configs -e OFFSET_STORAGE_TOPIC=my_connect_offsets --link zookeeper:zookeeper --link kafka:kafka --link mariadb:mysql --detach debezium/connect:0.5
+
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" 127.0.0.1:8083/connectors -d '{
+  "name":"inventory-connector",
+  "config":{
+    "connector.class":"io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max":"1",
+    "database.hostname":"mysql",
+    "database.port":"3306",
+    "database.user":"debezium",
+    "database.password":"dbz",
+    "database.server.id":"997",
+    "database.server.name":"dbserver1",
+    "database.whitelist":"inventory",
+    "database.history.kafka.bootstrap.servers":"kafka:9092",
+    "database.history.kafka.topic":"dbhistory.inventory"
+  }
+}'
+
+
+```
+
+
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" localhost:8083/connectors -d '{
+  "name":"inventory-connector",
+  "config":{
+    "connector.class":"io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max":"1",
+    "database.hostname":"28dfc1a5f493",
+    "database.port":"3306",
+    "database.user":"debezium",
+    "database.password":"dbz",
+    "database.server.id":"997",
+    "database.server.name":"dbserver1",
+    "database.whitelist":"inventory",
+    "database.history.kafka.bootstrap.servers":"kafka:9092",
+    "database.history.kafka.topic":"dbhistory.inventory"
+  }
+}'
